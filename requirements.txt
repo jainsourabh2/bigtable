@@ -1,1 +1,4 @@
 google-cloud-bigtable
+apscheduler
+Flask
+pandas

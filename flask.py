@@ -1,6 +1,5 @@
 # write a sample flask app with post method and run it on port 5000
 from flask import Flask, request
-import json
 import time
 from apscheduler.schedulers.background import BackgroundScheduler
 import argparse  
@@ -11,12 +10,10 @@ from google.cloud.bigtable import row_filters
 from google.cloud.bigtable.row_set import RowSet
 import atexit
 import pandas as pd
-import json
 
-# Needs to be populated
 project_id = ''
-instance_id = ''
-table_id = ''
+instance_id = 'redis-timestamp-instance-demo'
+table_id = 'timestamp-demo-1'
 
 # [START bigtable_hw_connect]
 client = bigtable.Client(project=project_id, admin=True)
@@ -33,11 +30,12 @@ column = "money".encode()
 
 data = {'timestamp':[],
         'rowid':[],
-        'value':[]}
+        'minimum':[],
+        'maximum':[]}
 
 def test_scheduler():
     end_timestamp = int(time.time())//60*60
-    start_timestamp = end_timestamp - 7200
+    start_timestamp = end_timestamp - (120*60*1000)
     print(start_timestamp)
     print(end_timestamp)
     print("Scanning for rows based on cell timestamp:")
@@ -57,20 +55,26 @@ def test_scheduler():
     global data
     data = {'timestamp':[],
             'rowid':[],
-            'value':[]}
+            'minimum':[],
+            'maximum':[]}
     st = time.time_ns()
     for row in rows:
+        minimum_money = 0
+        maximum_money = 0
         cells = len(row.cells[column_family_id][column]) 
         if cells == 3:
-            minimum_money = min(row.cells[column_family_id][column][0].value.decode("utf-8"),row.cells[column_family_id][column][1].value.decode("utf-8"),row.cells[column_family_id][column][2].value.decode("utf-8"))
+            minimum_money = min(int.from_bytes(row.cells[column_family_id][column][0].value, "big"),int.from_bytes(row.cells[column_family_id][column][1].value, "big"),int.from_bytes(row.cells[column_family_id][column][2].value, "big"))
+            maximum_money = max(int.from_bytes(row.cells[column_family_id][column][0].value, "big"),int.from_bytes(row.cells[column_family_id][column][1].value, "big"),int.from_bytes(row.cells[column_family_id][column][2].value, "big"))
         elif cells == 2:
-            minimum_money = min(row.cells[column_family_id][column][0].value.decode("utf-8"),row.cells[column_family_id][column][1].value.decode("utf-8"))
+            minimum_money = min(int.from_bytes(row.cells[column_family_id][column][0].value, "big"),int.from_bytes(row.cells[column_family_id][column][1].value, "big"))
+            maximum_money = max(int.from_bytes(row.cells[column_family_id][column][0].value, "big"),int.from_bytes(row.cells[column_family_id][column][1].value, "big"))
         else: 
-            minimum_money = min(row.cells[column_family_id][column][0].value.decode("utf-8"))
-        print(row.row_key.decode("utf-8").split("#"))   
+            minimum_money = int.from_bytes(row.cells[column_family_id][column][0].value, "big")
+            maximum_money = int.from_bytes(row.cells[column_family_id][column][0].value, "big")  
         data['timestamp'].append(row.row_key.decode("utf-8").split("#")[1])
         data['rowid'].append(row.row_key.decode("utf-8").split("#")[0])
-        data['value'].append(minimum_money)
+        data['minimum'].append(minimum_money)
+        data['maximum'].append(maximum_money)
     print(data)
     et = time.time_ns()
     print(st)
@@ -82,13 +86,18 @@ app = Flask(__name__)
 @app.route('/post', methods=['POST'])
 def post():
     global data
-    # data = request.get_json()
-    print(data)
+    input_data = request.get_json()
+    print(input_data['starttimestamp'])
+    print(input_data['endtimestamp'])
+    print(input_data['limitrows'])
     df = pd.DataFrame.from_dict(data)
     # df = pd.DataFrame(data)
     print(df)
-    output = df[df['timestamp'].astype(int) > (int(time.time())//60*60)-7200]
-    return output.to_json(orient = "records") , 200
+    output = df[(df['timestamp'].astype(int) > input_data['starttimestamp']) & (df['timestamp'].astype(int) < input_data['endtimestamp'])]
+    print(output)
+    final = output.sort_values(by=['timestamp']).tail(input_data['limitrows'])
+    print(final)
+    return final.to_json(orient = "records") , 200
 
 if __name__ == '__main__':
     print('Starting flask app')
@@ -96,3 +105,5 @@ if __name__ == '__main__':
     sched.add_job(test_scheduler, trigger="interval", seconds=10)
     sched.start()
     app.run(host='0.0.0.0', port=5000)    # run app on port 5000
+    # Shut down the scheduler when exiting the app
+    atexit.register(lambda: sched.shutdown())

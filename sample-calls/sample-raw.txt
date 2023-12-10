@@ -1,0 +1,3 @@
+curl -X POST -H "Content-Type: application/json" \
+    -d '{"starttimestamp":1695030240,"endtimestamp":1702230240,"limitrows":100}' \
+    http://x.x.x.x:5000/post

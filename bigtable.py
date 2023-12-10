@@ -50,9 +50,12 @@ def main(project_id, instance_id, table_id):
         row_key = str(i) + "#" + str(timestamp_value)
         timestamp = int(time.time())
         row = table.direct_row(row_key)
+        value_money =  int(random.randint(1, 1000))
         row.set_cell(
-            column_family_id, column, str(random.randint(1, 1000)), timestamp=datetime.utcnow()
+            column_family_id, column, value_money, timestamp=datetime.utcnow()
         )
+        print(row_key)
+        print(value_money)
         rows.append(row)
     table.mutate_rows(rows)
 
